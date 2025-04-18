@@ -250,4 +250,3 @@ case "$(uname -s)" in
 esac
 
 echo "INFO: Script finished."
-# --- End of Script ---

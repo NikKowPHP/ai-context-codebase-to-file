@@ -2,6 +2,7 @@
 
 **A Bash script to generate a comprehensive snapshot of your Git project directory for AI analysis.**
 
+
 ---
 
 ## Table of Contents
@@ -13,8 +14,9 @@
   - [Requirements](#requirements)
   - [Installation](#installation)
   - [Usage](#usage)
-- [Auto‑detect (must be inside a Git work tree):](#autodetect-must-be-inside-a-git-work-tree)
-- [OR explicitly point at a folder:](#or-explicitly-point-at-a-folder)
+- [1) Auto‑detect (must be inside a Git work tree):](#1-autodetect-must-be-inside-a-git-work-tree)
+- [2) Explicitly point at a folder:](#2-explicitly-point-at-a-folder)
+- [3) Also override exactly where the snapshot is written:](#3-also-override-exactly-where-the-snapshot-is-written)
 
 ---
 
@@ -61,11 +63,15 @@
 
 ## Usage
 
-From anywhere (inside or outside a Git repo), run:
-
-```bash
-# Auto‑detect (must be inside a Git work tree):
+# 1) Auto‑detect (must be inside a Git work tree):
 ./create_snapshot.sh
 
-# OR explicitly point at a folder:
+# 2) Explicitly point at a folder:
 ./create_snapshot.sh -f /path/to/my/project
+
+# 3) Also override exactly where the snapshot is written:
+./create_snapshot.sh \
+  -f /path/to/my/project \
+  -w /tmp/my_snapshot.txt
+
+By combining `-f` and `-w` you can scan *any* directory and write the result to *any* path.
