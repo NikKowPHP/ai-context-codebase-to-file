@@ -22,11 +22,14 @@
 # --- 1. Argument Parsing & Usage ---------------------------------------------
 usage() {
     cat <<EOF
-Usage: $(basename "$0") [ -f|--folder <path_to_project_root> ] [ -h|--help ]
+Usage: $(basename "$0") [ -f|--folder <path_to_project_root> ] \
+[ -w|--write-to <output_file_path> ] [ -h|--help ]
 
 Options:
   -f, --folder   Path to the folder you want to scan (optional).
                  If omitted, the script will auto‑detect the Git repo root.
+  -w, --write-to Full path (or relative path) to write the snapshot file.
+                 If omitted, defaults to \$PROJECT_ROOT/project_snapshot.txt
   -h, --help     Show this help message and exit.
 EOF
     exit 1
@@ -34,186 +37,118 @@ EOF
 
 # Collect CLI args
 FORCE_ROOT=""
+WRITE_TO=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -f|--folder)
       if [[ -n "$2" && ! "$2" =~ ^- ]]; then
-        FORCE_ROOT="$2"
-        shift 2
+        FORCE_ROOT="$2"; shift 2
       else
-        echo "ERROR: '$1' requires a non-empty argument." >&2
-        usage
+        echo "ERROR: '$1' requires a non-empty argument." >&2; usage
+      fi
+      ;;
+    -w|--write-to)
+      if [[ -n "$2" && ! "$2" =~ ^- ]]; then
+        WRITE_TO="$2"; shift 2
+      else
+        echo "ERROR: '$1' requires a non-empty argument." >&2; usage
       fi
       ;;
     -h|--help)
       usage
       ;;
     *)
-      echo "ERROR: Unknown option: $1" >&2
-      usage
+      echo "ERROR: Unknown option: $1" >&2; usage
       ;;
   esac
 done
 
+set -e
+set -o pipefail
+
 # --- 2. Determine PROJECT_ROOT -----------------------------------------------
 if [[ -n "$FORCE_ROOT" ]]; then
     echo "INFO: Using provided project root: $FORCE_ROOT"
-    if [[ -d "$FORCE_ROOT" ]]; then
-        PROJECT_ROOT="$(cd "$FORCE_ROOT" && pwd)"
-    else
-        echo "ERROR: '$FORCE_ROOT' is not a directory." >&2
-        exit 1
-    fi
+    [[ -d "$FORCE_ROOT" ]] || { echo "ERROR: '$FORCE_ROOT' is not a directory." >&2; exit 1; }
+    PROJECT_ROOT="$(cd "$FORCE_ROOT" && pwd)"
 else
     echo "INFO: Identifying Git repository root..."
     PROJECT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || {
       echo "ERROR: Not inside a Git repository (or git not installed)." >&2
       exit 1
     }
-    echo "INFO: Found project root: $PROJECT_ROOT"
 fi
-
 cd "$PROJECT_ROOT"
 echo "INFO: Changed directory to project root: $PROJECT_ROOT"
 
-# --- 3. Define Ignored Directories and Output File --------------------------
-OUTPUT_FILENAME="project_snapshot.txt"
-ABSOLUTE_OUTPUT_FILE="$PROJECT_ROOT/$OUTPUT_FILENAME"
+# --- 3. Compute OUTPUT_FILE / ABSOLUTE_OUTPUT_FILE ---------------------------
+if [[ -n "$WRITE_TO" ]]; then
+  # User‐supplied path (may be relative or absolute)
+  ABSOLUTE_OUTPUT_FILE="$(cd "$(dirname "$WRITE_TO")" && pwd)/$(basename "$WRITE_TO")"
+  OUTPUT_FILE="$ABSOLUTE_OUTPUT_FILE"
+else
+  OUTPUT_FILENAME="project_snapshot.txt"
+  ABSOLUTE_OUTPUT_FILE="$PROJECT_ROOT/$OUTPUT_FILENAME"
+  OUTPUT_FILE="$OUTPUT_FILENAME"    # relative to $PROJECT_ROOT
+fi
+echo "INFO: Will write snapshot to: $ABSOLUTE_OUTPUT_FILE"
+
+# --- 4. Define Ignored Items -------------------------------------------------
 IGNORED_ITEMS=(
-    # Version Control
-    ".git"
-    # Dependencies
-    "node_modules"
-    "vendor"
-    "bower_components"
-    # Common Build/Output Directories
-    "dist"
-    "build"
-    "out"
-    "target"
-    "public/build" # e.g., Remix, Laravel Mix
-    "www"          # e.g., Ionic
-    # Framework-Specific Build/Cache
-    ".next"        # Next.js
-    ".nuxt"        # Nuxt.js
-    ".svelte-kit"  # SvelteKit
-    ".cache"       # Gatsby, Parcel, etc.
-    # Python
-    ".venv"
-    "venv"
-    "env"
-    "__pycache__"
-    ".pytest_cache"
-    ".mypy_cache"
-    "htmlcov"
-    # Testing
-    "coverage"
-    # Logs & Temporary Files
-    "logs"
-    "tmp"
-    "temp"
-    # IDE & Editor Directories
-    ".idea"
-    ".vscode"
-    ".project"
-    ".settings"
-    # OS Generated Files
-    ".DS_Store"
-    "Thumbs.db"
-    # This script's output file
-    "$OUTPUT_FILENAME"
+    ".git" node_modules vendor bower_components
+    dist build out target public/build www
+    .next .nuxt .svelte-kit .cache
+    .venv venv env __pycache__ .pytest_cache .mypy_cache htmlcov
+    coverage logs tmp temp
+    .idea .vscode .project .settings
+    .DS_Store Thumbs.db
 )
-
-# Define the name of the output snapshot file.
-# Since we've cd'd to the PROJECT_ROOT, the output file path is relative to it.
-OUTPUT_FILE="$OUTPUT_FILENAME" # This is just the filename, relative to PROJECT_ROOT
-# Get the absolute path to the output file for file manager commands
-
-echo "INFO: Ignoring directories/files: ${IGNORED_ITEMS[*]}"
-echo "INFO: Output file set to: $OUTPUT_FILE (relative to project root)"
-
-# --- 4. Prepare Output File & Add Header ---
-# Write the AI context header to the output file.
-# This command uses '>' which creates the file or overwrites it if it exists.
-echo "INFO: Writing AI context header to '$OUTPUT_FILE'..."
-echo "# AI Context Reference: Please analyze the following project snapshot thoroughly to understand the codebase structure and content." > "$OUTPUT_FILE"
-# Any subsequent writes to the file in this script MUST use '>>' (append).
-
-# --- 5. Find and Process Files ---
-echo "INFO: Scanning files and generating snapshot content..."
-
-# Construct the -prune arguments for find dynamically based on IGNORED_ITEMS
-# We need to handle both directories and specific files like the output file.
-prune_args=()
-if [ ${#IGNORED_ITEMS[@]} -gt 0 ]; then
-    prune_args+=("(")
-    first=true
-    for item in "${IGNORED_ITEMS[@]}"; do
-        if [ "$first" = false ]; then
-            prune_args+=("-o")
-        fi
-        # Match by name - works for both files and directories at any depth
-        prune_args+=("-name" "$item")
-        first=false
-    done
-    # We want to prune the matching directories or files
-    prune_args+=(")" "-prune")
+# If output file lives under $PROJECT_ROOT, also ignore it by name:
+if [[ "$ABSOLUTE_OUTPUT_FILE" == "$PROJECT_ROOT/"* ]]; then
+  IGNORED_ITEMS+=( "$(basename "$ABSOLUTE_OUTPUT_FILE")" )
 fi
 
-# --- 7. Append Output to File ---
-# Find files, excluding specified items, and pipe to the processing loop.
-# The redirection '>> "$OUTPUT_FILE"' at the end APPENDS the output of the
-# 'while' loop to the file already created/cleared in Step 4.
-find . "${prune_args[@]}" -o -type f -print0 | while IFS= read -r -d $'\0' file; do
-    # --- 6. Inside the Loop: Process Each File ---
+echo "INFO: Ignoring: ${IGNORED_ITEMS[*]}"
 
-    # Get Relative Path (remove leading './')
-    RELATIVE_PATH="${file#./}"
+# --- 5. Prepare Output & Header ---------------------------------------------
+echo "INFO: Writing AI header to '$OUTPUT_FILE'..."
+echo "# AI Context Reference: Project snapshot generated on $(date)" > "$ABSOLUTE_OUTPUT_FILE"
 
-    # Double-check: Skip the output file itself (prune should handle it, but belt-and-suspenders)
-    if [[ "$RELATIVE_PATH" == "$OUTPUT_FILENAME" ]]; then
-        continue
-    fi
+# --- 6. Build prune_args & Scan Files ---------------------------------------
+prune_args=()
+if [ ${#IGNORED_ITEMS[@]} -gt 0 ]; then
+  prune_args+=( "(" )
+  first=true
+  for item in "${IGNORED_ITEMS[@]}"; do
+    if [ "$first" = false ]; then prune_args+=( -o ); fi
+    prune_args+=( -name "$item" )
+    first=false
+  done
+  prune_args+=( ")" -prune )
+fi
 
-    # Determine File Type using MIME types
-    # Use '|| true' to prevent script exit if 'file' command fails (e.g., permission denied)
-    MIME_TYPE=$(file --mime-type -b "$file" || echo "unknown/error") # Provide default on error
+echo "INFO: Scanning files..."
+find . "${prune_args[@]}" -o -type f -print0 |
+  while IFS= read -r -d '' file; do
+    REL="${file#./}"
+    [[ "$REL" == "$(basename "$ABSOLUTE_OUTPUT_FILE")" ]] && continue
 
-    # Conditional Processing based on MIME Type
-    if [[ "$MIME_TYPE" == "unknown/error" ]]; then
-        # Handle cases where file command failed
-        echo "--- SKIPPED FILE (Could not determine type): $RELATIVE_PATH ---"
-        echo ""
-    elif [[ $MIME_TYPE == text/* ]]; then
-        # Text File: Print header, content, footer, and newline
-        echo "--- START FILE: $RELATIVE_PATH ---"
-        # Use cat and handle potential errors reading the file gracefully
-        if cat "$file"; then
-            : # No-op, cat succeeded
-        else
-            echo "[Error reading file content for $RELATIVE_PATH]"
-        fi
-        echo "--- END FILE: $RELATIVE_PATH ---"
-        echo "" # Blank line for separation
-    elif [[ $MIME_TYPE == image/* ]]; then
-        # Image File: Print only the path marker
-        echo "--- IMAGE FILE: $RELATIVE_PATH ---"
-        echo "" # Blank line for separation
-    else
-        # Other File Types (e.g., binary, application/*): Print a path marker with MIME type
-        echo "--- OTHER FILE ($MIME_TYPE): $RELATIVE_PATH ---"
-        echo "" # Blank line for separation
-    fi
+    MIME=$(file --mime-type -b "$file" || echo "unknown/error")
+    case "$MIME" in
+      text/*)
+        echo "--- START FILE: $REL ---"
+        cat "$file" || echo "[Error reading $REL]"
+        echo "--- END FILE: $REL ---"; echo ;;
+      image/*)
+        echo "--- IMAGE FILE: $REL ---"; echo ;;
+      *)
+        echo "--- OTHER FILE ($MIME): $REL ---"; echo ;;
+    esac
+  done >> "$ABSOLUTE_OUTPUT_FILE"
 
-done >> "$OUTPUT_FILE" # Step 7 Implementation: APPEND loop output here.
+echo "INFO: Snapshot complete: $ABSOLUTE_OUTPUT_FILE"
 
-# --- 8. Final Touches & Testing ---
-# Final confirmation message. Testing steps are performed manually by the user.
-echo "INFO: Snapshot generation complete."
-echo "INFO: Output written to: $PROJECT_ROOT/$OUTPUT_FILE"
-
-
-# --- 9. Reveal Snapshot File in File Manager ---
+# --- 7. Reveal Snapshot File in File Manager ---
 echo "INFO: Attempting to reveal '$OUTPUT_FILE' in the default file manager..."
 # Goal: Open the containing folder ($PROJECT_ROOT) and select the file.
 # This works reliably via specific commands on macOS and Windows.
