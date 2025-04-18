@@ -13,12 +13,14 @@
   - [Requirements](#requirements)
   - [Installation](#installation)
   - [Usage](#usage)
+- [Auto‑detect (must be inside a Git work tree):](#autodetect-must-be-inside-a-git-work-tree)
+- [OR explicitly point at a folder:](#or-explicitly-point-at-a-folder)
 
 ---
 
 ## Overview
 
-`create_snapshot.sh` scans a Git repository (or any of its subdirectories), extracts the contents of text files (and simply lists paths for images/binaries), and consolidates everything into a single `project_snapshot.txt` file. An AI‑friendly header is prepended to help downstream tools analyze the codebase structure and content. Once generated, the script attempts to reveal the snapshot file in your system’s file manager.
+`create_snapshot.sh` scans a Git repository (or any of its subdirectories), extracts the contents of text files (and simply lists paths for images/binaries), and consolidates everything into a single `project_snapshot.txt` file. An AI‑friendly header is prepended to help downstream tools analyze the codebase structure and content. Once generated, the script attempts to reveal the snapshot file in your system's file manager.
 
 ---
 
@@ -59,4 +61,11 @@
 
 ## Usage
 
-From within any directory of your Git project, simply run:
+From anywhere (inside or outside a Git repo), run:
+
+```bash
+# Auto‑detect (must be inside a Git work tree):
+./create_snapshot.sh
+
+# OR explicitly point at a folder:
+./create_snapshot.sh -f /path/to/my/project

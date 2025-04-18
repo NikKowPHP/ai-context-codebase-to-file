@@ -19,30 +19,66 @@
 #               for your OS.
 # -----------------------------------------------------------------------------
 
-# --- 1. Script Setup ---
-# Exit immediately if a command exits with a non-zero status.
-set -e
-# Treat unset variables as an error when substituting. (Optional but good practice)
-# set -u # Uncomment if needed, but ensure all variables are handled.
-# Pipe commands should fail if any command in the pipeline fails, not just the last one.
-set -o pipefail
+# --- 1. Argument Parsing & Usage ---------------------------------------------
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [ -f|--folder <path_to_project_root> ] [ -h|--help ]
 
-# --- 2. Identify Git Workspace Root ---
-echo "INFO: Identifying Git repository root..."
-PROJECT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || {
-  echo "ERROR: Not inside a Git repository (or git command not found)." >&2
-  exit 1
+Options:
+  -f, --folder   Path to the folder you want to scan (optional).
+                 If omitted, the script will auto‑detect the Git repo root.
+  -h, --help     Show this help message and exit.
+EOF
+    exit 1
 }
-echo "INFO: Found project root: $PROJECT_ROOT"
-# Change directory to the project root for consistent relative paths
-cd "$PROJECT_ROOT"
-echo "INFO: Changed directory to project root."
 
-# --- 3. Define Ignored Directories and Output File ---
-# Array of directory/file names to ignore. Add more as needed.
-# IMPORTANT: .git is crucial to prevent scanning the git history itself.
-# Also ignoring the script's own output file.
+# Collect CLI args
+FORCE_ROOT=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -f|--folder)
+      if [[ -n "$2" && ! "$2" =~ ^- ]]; then
+        FORCE_ROOT="$2"
+        shift 2
+      else
+        echo "ERROR: '$1' requires a non-empty argument." >&2
+        usage
+      fi
+      ;;
+    -h|--help)
+      usage
+      ;;
+    *)
+      echo "ERROR: Unknown option: $1" >&2
+      usage
+      ;;
+  esac
+done
+
+# --- 2. Determine PROJECT_ROOT -----------------------------------------------
+if [[ -n "$FORCE_ROOT" ]]; then
+    echo "INFO: Using provided project root: $FORCE_ROOT"
+    if [[ -d "$FORCE_ROOT" ]]; then
+        PROJECT_ROOT="$(cd "$FORCE_ROOT" && pwd)"
+    else
+        echo "ERROR: '$FORCE_ROOT' is not a directory." >&2
+        exit 1
+    fi
+else
+    echo "INFO: Identifying Git repository root..."
+    PROJECT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || {
+      echo "ERROR: Not inside a Git repository (or git not installed)." >&2
+      exit 1
+    }
+    echo "INFO: Found project root: $PROJECT_ROOT"
+fi
+
+cd "$PROJECT_ROOT"
+echo "INFO: Changed directory to project root: $PROJECT_ROOT"
+
+# --- 3. Define Ignored Directories and Output File --------------------------
 OUTPUT_FILENAME="project_snapshot.txt"
+ABSOLUTE_OUTPUT_FILE="$PROJECT_ROOT/$OUTPUT_FILENAME"
 IGNORED_ITEMS=(
     # Version Control
     ".git"
@@ -88,13 +124,10 @@ IGNORED_ITEMS=(
     "$OUTPUT_FILENAME"
 )
 
-
 # Define the name of the output snapshot file.
 # Since we've cd'd to the PROJECT_ROOT, the output file path is relative to it.
 OUTPUT_FILE="$OUTPUT_FILENAME" # This is just the filename, relative to PROJECT_ROOT
 # Get the absolute path to the output file for file manager commands
-ABSOLUTE_OUTPUT_FILE="$PWD/$OUTPUT_FILENAME"
-
 
 echo "INFO: Ignoring directories/files: ${IGNORED_ITEMS[*]}"
 echo "INFO: Output file set to: $OUTPUT_FILE (relative to project root)"
